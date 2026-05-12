@@ -42,6 +42,7 @@ type IssuesOptions struct { //nolint:revive // export stutter
 	SubscriberID       int64
 	MilestoneIDs       []int64
 	ProjectIDs         []int64
+	ProjectColumnID    int64
 	IsClosed           optional.Option[bool]
 	IsPull             optional.Option[bool]
 	LabelIDs           []int64
@@ -206,7 +207,13 @@ func applyProjectCondition(sess *xorm.Session, opts *IssuesOptions) {
 	if len(projectIDs) == 1 && projectIDs[0] == db.NoConditionID { // show those that are in no project
 		sess.And(builder.NotIn("issue.id", builder.Select("issue_id").From("project_issue")))
 	} else if len(projectIDs) == 1 && projectIDs[0] > 0 { // single specific project
-		sess.Join("INNER", "project_issue", "issue.id = project_issue.issue_id AND project_issue.project_id = ?", projectIDs[0])
+		if opts.ProjectColumnID > 0 {
+			sess.Join("INNER", "project_issue",
+				"issue.id = project_issue.issue_id AND project_issue.project_id = ? AND project_issue.project_board_id = ?",
+				projectIDs[0], opts.ProjectColumnID)
+		} else {
+			sess.Join("INNER", "project_issue", "issue.id = project_issue.issue_id AND project_issue.project_id = ?", projectIDs[0])
+		}
 	} else if len(projectIDs) > 1 { // multiple projects
 		// FIXME: ISSUE-MULTIPLE-PROJECTS-FILTER: this logic is not right, it should use "AND" but not "OR"
 		sess.And(builder.In("issue.id", builder.Select("issue_id").From("project_issue").Where(builder.In("project_id", projectIDs))))

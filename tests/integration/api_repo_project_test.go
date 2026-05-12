@@ -15,6 +15,7 @@ import (
 	"code.gitea.io/gitea/models/unittest"
 	user_model "code.gitea.io/gitea/models/user"
 	api "code.gitea.io/gitea/modules/structs"
+	projects_service "code.gitea.io/gitea/services/projects"
 	"code.gitea.io/gitea/tests"
 
 	"github.com/stretchr/testify/assert"
@@ -542,8 +543,8 @@ func testAPIAddIssueToProjectColumn(t *testing.T) {
 func testAPIListProjectColumnIssues(t *testing.T) {
 	repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: 1})
 	owner := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: repo.OwnerID})
-	issue := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 1})
-	pull := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 2})
+	issueA := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 1})
+	issueB := unittest.AssertExistsAndLoadBean(t, &issues_model.Issue{ID: 2})
 
 	project := &project_model.Project{
 		Title:        "Project for Column Issues",
@@ -555,35 +556,52 @@ func testAPIListProjectColumnIssues(t *testing.T) {
 	err := project_model.NewProject(t.Context(), project)
 	assert.NoError(t, err)
 
-	column := &project_model.Column{
-		Title:     "Column for Issues",
+	columnA := &project_model.Column{
+		Title:     "Column A",
 		ProjectID: project.ID,
 		CreatorID: owner.ID,
 	}
-	err = project_model.NewColumn(t.Context(), column)
+	err = project_model.NewColumn(t.Context(), columnA)
 	assert.NoError(t, err)
 
-	err = issues_model.IssueAssignOrRemoveProject(t.Context(), issue, owner, []int64{project.ID})
+	columnB := &project_model.Column{
+		Title:     "Column B",
+		ProjectID: project.ID,
+		CreatorID: owner.ID,
+	}
+	err = project_model.NewColumn(t.Context(), columnB)
 	assert.NoError(t, err)
-	err = issues_model.IssueAssignOrRemoveProject(t.Context(), pull, owner, []int64{project.ID})
+
+	// Place issueA in columnA, issueB in columnB.
+	err = issues_model.IssueAssignOrRemoveProject(t.Context(), issueA, owner, []int64{project.ID})
+	assert.NoError(t, err)
+	err = projects_service.MoveIssuesOnProjectColumn(t.Context(), owner, columnA, map[int64]int64{0: issueA.ID})
+	assert.NoError(t, err)
+
+	err = issues_model.IssueAssignOrRemoveProject(t.Context(), issueB, owner, []int64{project.ID})
+	assert.NoError(t, err)
+	err = projects_service.MoveIssuesOnProjectColumn(t.Context(), owner, columnB, map[int64]int64{0: issueB.ID})
 	assert.NoError(t, err)
 
 	token := getUserToken(t, owner.Name, auth_model.AccessTokenScopeReadIssue)
 
-	req := NewRequestf(t, "GET", "/api/v1/repos/%s/%s/projects/%d/columns/%d/issues", owner.Name, repo.Name, project.ID, column.ID).
+	// Column A should contain only issueA.
+	req := NewRequestf(t, "GET", "/api/v1/repos/%s/%s/projects/%d/columns/%d/issues", owner.Name, repo.Name, project.ID, columnA.ID).
 		AddTokenAuth(token)
 	resp := MakeRequest(t, req, http.StatusOK)
+	var issuesA []api.Issue
+	DecodeJSON(t, resp, &issuesA)
+	assert.Len(t, issuesA, 1)
+	assert.Equal(t, issueA.ID, issuesA[0].ID)
 
-	var issues []api.Issue
-	DecodeJSON(t, resp, &issues)
-	assert.Len(t, issues, 2)
-
-	issueIDs := make(map[int64]struct{}, len(issues))
-	for _, apiIssue := range issues {
-		issueIDs[apiIssue.ID] = struct{}{}
-	}
-	assert.Contains(t, issueIDs, issue.ID)
-	assert.Contains(t, issueIDs, pull.ID)
+	// Column B should contain only issueB.
+	req = NewRequestf(t, "GET", "/api/v1/repos/%s/%s/projects/%d/columns/%d/issues", owner.Name, repo.Name, project.ID, columnB.ID).
+		AddTokenAuth(token)
+	resp = MakeRequest(t, req, http.StatusOK)
+	var issuesB []api.Issue
+	DecodeJSON(t, resp, &issuesB)
+	assert.Len(t, issuesB, 1)
+	assert.Equal(t, issueB.ID, issuesB[0].ID)
 }
 
 func testAPIRemoveIssueFromProjectColumn(t *testing.T) {
