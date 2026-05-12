@@ -694,10 +694,11 @@ func ListProjectColumnIssues(ctx *context.APIContext) {
 
 	listOptions := utils.GetListOptions(ctx)
 	issuesOpts := &issues_model.IssuesOptions{
-		Paginator:  &listOptions,
-		RepoIDs:    []int64{ctx.Repo.Repository.ID},
-		ProjectIDs: []int64{column.ProjectID},
-		SortType:   issues_model.SortTypeProjectColumnSorting,
+		Paginator:       &listOptions,
+		RepoIDs:         []int64{ctx.Repo.Repository.ID},
+		ProjectIDs:      []int64{column.ProjectID},
+		ProjectColumnID: column.ID,
+		SortType:        issues_model.SortTypeProjectColumnSorting,
 	}
 
 	count, err := issues_model.CountIssues(ctx, issuesOpts)
